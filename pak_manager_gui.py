@@ -1964,7 +1964,82 @@ class UEPakToolApp:
                                parent=self.root)
             sys.exit(1)
 
-if __name__ == "__main__":
+import argparse
+
+
+def _load_unrealpak_path(config_file: str = CONFIG_FILE) -> Optional[str]:
+    """Возвращает путь к UnrealPak из переменной окружения или конфигурации."""
+    env_path = os.environ.get("UNREALPAK_PATH")
+    if env_path:
+        return env_path
+
+    config = configparser.ConfigParser()
+    if os.path.exists(config_file):
+        config.read(config_file, encoding="utf-8")
+        if config.has_section(CONFIG_SECTION_PATHS):
+            return config.get(
+                CONFIG_SECTION_PATHS, KEY_UNREALPAK_PATH, fallback=None
+            )
+    return None
+
+
+def _save_unrealpak_path(path: str, config_file: str = CONFIG_FILE) -> None:
+    """Сохраняет путь к UnrealPak в конфигурационный файл."""
+    config = configparser.ConfigParser()
+    if os.path.exists(config_file):
+        config.read(config_file, encoding="utf-8")
+    if not config.has_section(CONFIG_SECTION_PATHS):
+        config.add_section(CONFIG_SECTION_PATHS)
+    config.set(CONFIG_SECTION_PATHS, KEY_UNREALPAK_PATH, path)
+    with open(config_file, "w", encoding="utf-8") as f:
+        config.write(f)
+
+
+def _run_cli(unrealpak: str, args: list) -> int:
+    """Запускает UnrealPak с указанными аргументами."""
+    try:
+        cmd = [unrealpak] + args
+        print("Running:", " ".join(cmd))
+        proc = subprocess.run(cmd, check=True)
+        return proc.returncode
+    except subprocess.CalledProcessError as e:
+        print(f"UnrealPak error: {e}")
+        return e.returncode
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description="UE Pak Tool")
+    parser.add_argument("--pack", nargs=2, metavar=("FOLDER", "PAK"), help="Pack folder to PAK")
+    parser.add_argument("--unpack", nargs=2, metavar=("PAK", "DIR"), help="Unpack PAK to folder")
+    parser.add_argument("--list", metavar="PAK", help="List contents of PAK")
+    parser.add_argument("--set-unrealpak", metavar="PATH", help="Save UnrealPak path")
+    parser.add_argument("--config", metavar="FILE", default=CONFIG_FILE, help="Config file path")
+    parser.add_argument("--gui", action="store_true", help="Force launch GUI")
+    args = parser.parse_args()
+
+    if args.set_unrealpak:
+        _save_unrealpak_path(args.set_unrealpak, args.config)
+        print(f"UnrealPak path saved to {args.config}")
+        return 0
+
+    if any([args.pack, args.unpack, args.list]) and not args.gui:
+        unrealpak = _load_unrealpak_path(args.config)
+        if not unrealpak or not os.path.isfile(unrealpak):
+            print(
+                "UnrealPak path not configured. "
+                "Используйте --set-unrealpak или переменную UNREALPAK_PATH."
+            )
+            return 1
+
+        if args.pack:
+            folder, pak_file = args.pack
+            return _run_cli(unrealpak, [pak_file, f"-Create={folder}"])
+        if args.unpack:
+            pak_file, out_dir = args.unpack
+            return _run_cli(unrealpak, [pak_file, "-Extract", out_dir])
+        if args.list:
+            return _run_cli(unrealpak, [args.list, "-List"])
+
     RootClass = TkinterDnD.Tk if USE_DND else tk.Tk
     root = RootClass()
     try:
@@ -1972,4 +2047,9 @@ if __name__ == "__main__":
         app.run()
     except Exception as e:
         messagebox.showerror("Ошибка запуска", f"Не удалось запустить приложение:\n{e}")
-        sys.exit(1)
+        return 1
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
